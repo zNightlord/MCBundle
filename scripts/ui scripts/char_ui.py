@@ -1410,13 +1410,25 @@ def update(self,context):
     if obj.is_viewport:
         pose_bones['panel']["subdivision"] = 0
 
-    image = bpy.data.images["MCB - Skin"]
+    data = bpy.data
+    data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture'].image = bpy.data.images["MCB - Skin"]
+    image = data.images["MCB - Skin"]
     image.filepath = obj.skin   
 
 bpy.types.Object.second_layer = BoolProperty(name="second layer", default= False, override={"LIBRARY_OVERRIDABLE"},update= update)
 bpy.types.Object.is_viewport = BoolProperty(name="viewport", default= False, override={"LIBRARY_OVERRIDABLE"},update= update)
 bpy.types.Object.rig_name = StringProperty(name="rig_name", default= "Default Steve", override ={"LIBRARY_OVERRIDABLE"},update= update)
 bpy.types.Object.skin = StringProperty(name = "Skin Directory", description= "Add your skin here (1.8 Skin Supported)", subtype= "FILE_PATH", override= {"LIBRARY_OVERRIDABLE"}, update= update)
+
+## mcprep integration
+mcprep = False
+try:
+    from MCprep_addon.materials import skin # type: ignore
+    import MCprep_addon.conf as conf # type: ignore
+    mcprep = True
+except:
+    data = bpy.data
+    data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture'].image = bpy.data.images["MCB - Skin"]
 
 class RigUI(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
@@ -1452,12 +1464,29 @@ class RigProperties(bpy.types.Panel):
         obj = context.object
         act_obj = context.active_object
         pose_bones = obj.pose.bones
-
-        
+        data = bpy.data
+        image = data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture']
         group1 = layout.column(align= True)
         group1.prop(obj, "rig_name",text= "Rig name")
         group1 = layout.column(align= True)
-        group1.prop(obj, "skin", icon= "IMAGE_DATA", text= "")
+        group1_row = group1.row(align= True)
+        group1_row.prop(image, "image", icon= "IMAGE_DATA", text= "")
+        p = group1_row.operator("mcprep.skin_swapper", text= "",icon= "FILEBROWSER")
+        p.new_material = False
+        if mcprep:
+            sind = context.scene.mcprep_skins_list_index
+            group1_col = group1.column(align= True)
+            group1_col.separator()
+            group1_col.template_list(
+				"MCPREP_UL_skins", "",
+				context.scene, "mcprep_skins_list",
+				context.scene, "mcprep_skins_list_index",
+				rows=1)
+            skinname = bpy.path.basename(conf.skin_list[sind][0])
+            p = group1_col.operator("mcprep.applyskin", text="Apply " + skinname)
+            p.new_material = False
+            p.filepath = conf.skin_list[sind][1]
+
         group1 = layout.column(align= True)
         group1_row = group1.row(align= True)
         group1_row.prop(pose_bones['panel'], '["subdivision"]', text='Subdivision', slider=True)
