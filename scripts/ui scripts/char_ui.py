@@ -1336,7 +1336,8 @@ class RigifySwitchParentSnap:
             else:
                 name = parent_name.lower()
             if 'hand_fk' in name:
-                parent = name.replace('hand_fk','forearm_fk')
+                parent = name #.replace('hand_fk','forearm_fk')
+                ma = get_local_pose_matrix(pose.bones[parent]) # get_transform_matrix(obj,parent)
 
                 # parent_matrix = get_transform_matrix(obj,parent)
                 # set_transform_from_matrix(
@@ -1344,7 +1345,7 @@ class RigifySwitchParentSnap:
                 # no_loc=self.locks[0], no_rot=self.locks[1], no_scale=self.locks[2]
                 # )
                 set_transform_from_matrix(
-                obj, self.bone, get_transform_matrix(obj,parent) , keyflags=self.keyflags,
+                obj, self.bone, ma, keyflags=self.keyflags,
                 no_loc=self.locks[0], no_rot=self.locks[1], no_scale=self.locks[2]
                 )
 
@@ -1403,23 +1404,64 @@ class POSE_OT_rigify_switch_parent_bake(RigifySwitchParentBase, RigifyBakeKeyfra
 ###################
 ## Rig UI Panels ##
 ###################
-def update(self,context):
+def update_rig(self,context):
     obj = context.object
     pose_bones = obj.pose.bones
-    pose_bones['panel']["second_layer"] = obj.second_layer
     if obj.is_viewport:
-        pose_bones['panel']["subdivision"] = 0
+        obj.subdivision = 0
+        pose_bones['panel']["subdivision"] = obj.subdivision
+    else:
+        pose_bones['panel']["subdivision"] = obj.subdivision
 
+def update_collection(self,context):
+    obj = context.object
+    pose_bones = obj.pose.bones
+    data = bpy.data
+    name = 'MCB - ' + obj.rig_name
+    data.collections[name + ' Layer'].hide_viewport = not obj.second_layer
+    data.collections[name + ' Layer'].hide_render = not obj.second_layer
+    data.collections[name +' Mesh'].hide_select = not obj.restricted_select
+
+def update_name(self,context):
+    obj = context.object
+    name = 'MCB - ' + obj.rig_name
+    if obj.rig_name != obj.tmp_rig_name:
+        obj.users_collection[0].name = name
+        for col in obj.users_collection[0].children:
+            if "Extras" in col.name:
+                col.name = name + ' Extras'
+            elif "Mesh" in col.name:
+                col.name = name + ' Mesh'
+                for colc in col.children:
+                    if "Layer" in colc.name:
+                        colc.name = name + ' Layer'
+            elif "WGTS" in col.name:
+                col.name = name + ' WGTS'
+            elif "Shapekey" in col.name:
+                col.name = name + ' Shapekey'
+        obj.name = name
+        obj.tmp_rig_name = obj.rig_name
+
+def update_skin(self,context):
+    obj = context.object
     data = bpy.data
     data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture'].image = bpy.data.images["MCB - Skin"]
     image = data.images["MCB - Skin"]
+    print(image)
     image.filepath = obj.skin   
 
-bpy.types.Object.second_layer = BoolProperty(name="second layer", default= False, override={"LIBRARY_OVERRIDABLE"},update= update)
-bpy.types.Object.is_viewport = BoolProperty(name="viewport", default= False, override={"LIBRARY_OVERRIDABLE"},update= update)
-bpy.types.Object.rig_name = StringProperty(name="rig_name", default= "Default Steve", override ={"LIBRARY_OVERRIDABLE"},update= update)
-bpy.types.Object.skin = StringProperty(name = "Skin Directory", description= "Add your skin here (1.8 Skin Supported)", subtype= "FILE_PATH", override= {"LIBRARY_OVERRIDABLE"}, update= update)
+bpy.types.Object.second_layer = BoolProperty(name="Second Layer", default= False, override={"LIBRARY_OVERRIDABLE"},update= update_collection)
+bpy.types.Object.restricted_select = BoolProperty(name="Restricted Select", default= False, override={"LIBRARY_OVERRIDABLE"},update= update_collection)
 
+bpy.types.Object.is_viewport = BoolProperty(name="Solid Viewport", default= False, override={"LIBRARY_OVERRIDABLE"},update= update_rig)
+bpy.types.Object.subdivision = IntProperty(name="Subdivision", default= 0, min= 0, max= 2, override={"LIBRARY_OVERRIDABLE"},update= update_rig)
+bpy.types.Object.rig_name = StringProperty(name="Rig name", default= "Default Steve", override ={"LIBRARY_OVERRIDABLE"},update= update_name)
+bpy.types.Object.tmp_rig_name = StringProperty(name="tmp_rig_name", default= "", override ={"LIBRARY_OVERRIDABLE"})
+
+bpy.types.Object.skin = StringProperty(name = "Skin Directory", description= "Add your skin here (1.8 Skin Support)", override= {"LIBRARY_OVERRIDABLE"}, subtype= "FILE_PATH", update= update_skin)
+
+import addon_utils
+add_default,add_state = addon_utils.check('MCprep_addon')
 ## mcprep integration
 mcprep = False
 try:
@@ -1464,36 +1506,59 @@ class RigProperties(bpy.types.Panel):
         obj = context.object
         act_obj = context.active_object
         pose_bones = obj.pose.bones
-        data = bpy.data
-        image = data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture']
-        group1 = layout.column(align= True)
-        group1.prop(obj, "rig_name",text= "Rig name")
-        group1 = layout.column(align= True)
-        group1_row = group1.row(align= True)
-        group1_row.prop(image, "image", icon= "IMAGE_DATA", text= "")
-        p = group1_row.operator("mcprep.skin_swapper", text= "",icon= "FILEBROWSER")
-        p.new_material = False
-        if mcprep:
-            sind = context.scene.mcprep_skins_list_index
-            group1_col = group1.column(align= True)
-            group1_col.separator()
-            group1_col.template_list(
-				"MCPREP_UL_skins", "",
-				context.scene, "mcprep_skins_list",
-				context.scene, "mcprep_skins_list_index",
-				rows=1)
-            skinname = bpy.path.basename(conf.skin_list[sind][0])
-            p = group1_col.operator("mcprep.applyskin", text="Apply " + skinname)
-            p.new_material = False
-            p.filepath = conf.skin_list[sind][1]
+        
 
         group1 = layout.column(align= True)
+        group1.label(text=" Name:")
+        group1.prop(obj, "rig_name",text= "")
+        
+        # image = data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture']
+        # group1_row.prop(image, "image", icon= "IMAGE_DATA", text= "")
+        # data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture'].image
+        try:
+            group1 = layout.column(align= True) 
+            group1_col = group1.column(align= True).box()
+            group1_col.template_list(
+                "MCPREP_UL_skins", "",
+                context.scene, "mcprep_skins_list",
+                context.scene, "mcprep_skins_list_index",
+                rows=1)
+            group1_row = group1_col.row(align= True)
+            try:
+                sind = context.scene.mcprep_skins_list_index
+                skinname = bpy.path.basename(conf.skin_list[sind][0])
+                p = group1_row.operator("mcprep.applyskin", text="Apply " + skinname)
+                p.new_material = False
+                p.filepath = conf.skin_list[sind][1]
+            except:
+                p = group1_row.operator("mcprep.reload_skins", text="Press to reload", icon="ERROR")
+            p = group1_row.operator("mcprep.skin_swapper", text= "",icon= "FILEBROWSER")
+            p.new_material = False
+            p = group1_row.operator("mcprep.applyusernameskin", text="",icon="IMPORT")
+            p.new_material = False
+        except:
+            group1 = layout.column(align= True) 
+            group1_row = group1.row(align= True)
+            group1_row.prop(obj, "skin", icon= "IMAGE_DATA", text= "")
+
+        layout.separator()
+        group1 = layout.column(align= True)
         group1_row = group1.row(align= True)
-        group1_row.prop(pose_bones['panel'], '["subdivision"]', text='Subdivision', slider=True)
+        group1_row.prop(obj, "subdivision", text='Subdivision', slider=True)
         group1_row.prop(obj, "is_viewport", icon= "SHADING_SOLID",text ="", toggle= True)
         group1 = layout.column(align= True)
         group1.prop(obj,"second_layer",text= "Extrude layer",toggle= True)
+        group1.prop(obj,"restricted_select",text= "Restricted Select",toggle= True)
 
+        layout.separator()
+        group1 = layout.column(align= True) 
+        group1_row = group1.row(align=True)
+        group1_row.prop(pose_bones['panel'], '["eye_right_color"]', text='')
+        group1_row.prop(pose_bones['panel'], '["eye_left_color"]', text='')
+        group1_col = group1.column(align=True)
+        group1_col.prop(pose_bones['panel'], '["pupil_color"]', text='')
+        group1_col.prop(pose_bones['panel'], '["brow_color"]', text='')
+        
 class RigControl(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -1542,8 +1607,8 @@ class RigControl(bpy.types.Panel):
         # if is_selected({'lip.T.corner.L.001'}):
         #     emit_rig_separator()
         #     layout.prop(pose_bones['lip.T.corner.L.001'], '["enable_bone_gizmo"]', text='Enable Bone Gizmo', slider=False)
-
-        if is_selected({'shin_tweak.L.001', 'foot_heel_ik.L', 'foot_tweak.L', 'foot_spin_ik.L', 'thigh_fk.L', 'thigh_parent.L', 'thigh_tweak.L', 'foot_fk.L', 'thigh_ik.L', 'shin_fk.L', 'VIS_thigh_ik_pole.L', 'foot_ik.L', 'toe.L', 'thigh_ik_target.L', 'thigh_tweak.L.001', 'shin_tweak.L'}):
+        
+        if is_selected({'leg.L','shin_tweak.L.001', 'foot_heel_ik.L', 'foot_tweak.L', 'foot_spin_ik.L', 'thigh_fk.L', 'thigh_parent.L', 'thigh_tweak.L', 'foot_fk.L', 'thigh_ik.L', 'shin_fk.L', 'VIS_thigh_ik_pole.L', 'foot_ik.L', 'toe.L', 'thigh_ik_target.L', 'thigh_tweak.L.001', 'shin_tweak.L'}):
             emit_rig_separator()
             if is_selected({'foot_fk.L', 'toe.L', 'thigh_fk.L', 'thigh_parent.L', 'shin_fk.L'}):
                 layout.prop(pose_bones['thigh_parent.L'], '["FK_limb_follow"]', text='FK Limb Follow', slider=True)
@@ -1578,11 +1643,11 @@ class RigControl(bpy.types.Panel):
             props.extra_ctrls = '["foot_heel_ik.L", "foot_spin_ik.L"]'
             props = group2.operator(rig_clear_keyframes, text='Clear', icon='CANCEL')
             props.bones = '["thigh_ik.L", "thigh_ik_target.L", "foot_ik.L", "foot_heel_ik.L", "foot_spin_ik.L"]'
-            if is_selected({'foot_ik.L', 'foot_spin_ik.L', 'thigh_ik_target.L', 'thigh_parent.L', 'thigh_ik.L', 'foot_heel_ik.L'}):
+            if is_selected({'leg.L', 'foot_ik.L', 'foot_spin_ik.L', 'thigh_ik_target.L', 'thigh_parent.L', 'thigh_ik.L', 'foot_heel_ik.L'}):
                 layout.prop(pose_bones['thigh_parent.L'], '["IK_Stretch"]', text='IK Stretch', slider=True)
                 group1 = layout.row(align=True)
                 group2 = group1.split(factor=0.75, align=True)
-                props = group2.operator(rig_toggle_pole_bake, icon='FORCE_MAGNETIC')
+                props = group2.operator(rig_toggle_pole, icon='FORCE_MAGNETIC')
                 props.prop_bone = 'thigh_parent.L'
                 props.ik_bones = '["thigh_ik.L", "MCH-shin_ik.L", "MCH-thigh_ik_target.L"]'
                 props.ctrl_bones = '["thigh_ik.L", "thigh_ik_target.L", "foot_ik.L"]'
@@ -1599,14 +1664,14 @@ class RigControl(bpy.types.Panel):
                 props.bone = 'foot_ik.L'
                 props.prop_bone = 'thigh_parent.L'
                 props.prop_id = 'IK_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.L.001"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.L", "torso_flip"]'
                 props.locks = (False, False, False)
                 group2.prop(pose_bones['thigh_parent.L'], '["IK_parent"]', text='')
                 props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
                 props.bone = 'foot_ik.L'
                 props.prop_bone = 'thigh_parent.L'
                 props.prop_id = 'IK_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.L.001"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.L", "torso_flip"]'
                 props.locks = (False, False, False)
                 group1 = layout.row(align=True)
                 group2 = group1.split(factor=0.75, align=True)
@@ -1614,14 +1679,14 @@ class RigControl(bpy.types.Panel):
                 props.bone = 'thigh_ik_target.L'
                 props.prop_bone = 'thigh_parent.L'
                 props.prop_id = 'pole_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.L.001", "foot_ik.L"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.L", "foot_ik.L"]'
                 props.locks = (False, True, True)
                 group2.prop(pose_bones['thigh_parent.L'], '["pole_parent"]', text='')
                 props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
                 props.bone = 'thigh_ik_target.L'
                 props.prop_bone = 'thigh_parent.L'
                 props.prop_id = 'pole_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.L.001", "foot_ik.L"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.L", "foot_ik.L"]'
                 props.locks = (False, True, True)
             if is_selected({'thigh_tweak.L.001'}):
                 layout.prop(pose_bones['thigh_tweak.L.001'], '["rubber_tweak"]', text='Rubber Tweak (thigh.L)', slider=True)
@@ -1629,8 +1694,25 @@ class RigControl(bpy.types.Panel):
                 layout.prop(pose_bones['shin_tweak.L'], '["rubber_tweak"]', text='Rubber Tweak (shin.L)', slider=True)
             if is_selected({'shin_tweak.L.001'}):
                 layout.prop(pose_bones['shin_tweak.L.001'], '["rubber_tweak"]', text='Rubber Tweak (shin.L)', slider=True)
+            if is_selected({'leg.L', 'thigh_parent.L'}):
+                emit_rig_separator()
+                group1 = layout.row(align=True)
+                group2 = group1.split(factor=0.75, align=True)
+                props = group2.operator(rig_switch_parent, text='Limb Parent', icon='DOWNARROW_HLT')
+                props.bone = 'thigh_parent.L'
+                props.prop_bone = 'thigh_parent.L'
+                props.prop_id = 'limb_parent'
+                props.parent_names = '["None", "Root", "Pelvis"]'
+                props.locks = (False, False, False)
+                group2.prop(pose_bones['thigh_parent.L'], '["limb_parent"]', text='')
+                props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
+                props.bone = 'thigh_parent.L'
+                props.prop_bone = 'thigh_parent.L'
+                props.prop_id = 'limb_parent'
+                props.parent_names = '["None", "Root", "Pelvis"]'
+                props.locks = (False, False, False)
 
-        if is_selected({'foot_fk.R', 'thigh_tweak.R.001', 'foot_tweak.R', 'foot_ik.R', 'shin_tweak.R.001', 'VIS_thigh_ik_pole.R', 'toe.R', 'thigh_tweak.R', 'foot_heel_ik.R', 'thigh_ik.R', 'thigh_fk.R', 'shin_fk.R', 'shin_tweak.R', 'foot_spin_ik.R', 'thigh_parent.R', 'thigh_ik_target.R'}):
+        if is_selected({'leg.R', 'foot_fk.R', 'thigh_tweak.R.001', 'foot_tweak.R', 'foot_ik.R', 'shin_tweak.R.001', 'VIS_thigh_ik_pole.R', 'toe.R', 'thigh_tweak.R', 'foot_heel_ik.R', 'thigh_ik.R', 'thigh_fk.R', 'shin_fk.R', 'shin_tweak.R', 'foot_spin_ik.R', 'thigh_parent.R', 'thigh_ik_target.R'}):
             emit_rig_separator()
             if is_selected({'foot_fk.R', 'toe.R', 'shin_fk.R', 'thigh_parent.R', 'thigh_fk.R'}):
                 layout.prop(pose_bones['thigh_parent.R'], '["FK_limb_follow"]', text='FK Limb Follow', slider=True)
@@ -1665,7 +1747,7 @@ class RigControl(bpy.types.Panel):
             props.extra_ctrls = '["foot_heel_ik.R", "foot_spin_ik.R"]'
             props = group2.operator(rig_clear_keyframes, text='Clear', icon='CANCEL')
             props.bones = '["thigh_ik.R", "thigh_ik_target.R", "foot_ik.R", "foot_heel_ik.R", "foot_spin_ik.R"]'
-            if is_selected({'foot_spin_ik.R', 'foot_heel_ik.R', 'foot_ik.R', 'thigh_ik.R', 'thigh_parent.R', 'thigh_ik_target.R'}):
+            if is_selected({'leg.R', 'foot_spin_ik.R', 'foot_heel_ik.R', 'foot_ik.R', 'thigh_ik.R', 'thigh_parent.R', 'thigh_ik_target.R'}):
                 layout.prop(pose_bones['thigh_parent.R'], '["IK_Stretch"]', text='IK Stretch', slider=True)
                 group1 = layout.row(align=True)
                 group2 = group1.split(factor=0.75, align=True)
@@ -1686,14 +1768,14 @@ class RigControl(bpy.types.Panel):
                 props.bone = 'foot_ik.R'
                 props.prop_bone = 'thigh_parent.R'
                 props.prop_id = 'IK_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.R.001"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.R", "torso_flip"]'
                 props.locks = (False, False, False)
                 group2.prop(pose_bones['thigh_parent.R'], '["IK_parent"]', text='')
                 props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
                 props.bone = 'foot_ik.R'
                 props.prop_bone = 'thigh_parent.R'
                 props.prop_id = 'IK_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.R.001"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.R", "torso_flip"]'
                 props.locks = (False, False, False)
                 group1 = layout.row(align=True)
                 group2 = group1.split(factor=0.75, align=True)
@@ -1701,14 +1783,14 @@ class RigControl(bpy.types.Panel):
                 props.bone = 'thigh_ik_target.R'
                 props.prop_bone = 'thigh_parent.R'
                 props.prop_id = 'pole_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.R.001", "foot_ik.R"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.R", "foot_ik.R"]'
                 props.locks = (False, True, True)
                 group2.prop(pose_bones['thigh_parent.R'], '["pole_parent"]', text='')
                 props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
                 props.bone = 'thigh_ik_target.R'
                 props.prop_bone = 'thigh_parent.R'
                 props.prop_id = 'pole_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.R.001", "foot_ik.R"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.R", "foot_ik.R"]'
                 props.locks = (False, True, True)
             if is_selected({'thigh_tweak.R.001'}):
                 layout.prop(pose_bones['thigh_tweak.R.001'], '["rubber_tweak"]', text='Rubber Tweak (thigh.R)', slider=True)
@@ -1716,17 +1798,49 @@ class RigControl(bpy.types.Panel):
                 layout.prop(pose_bones['shin_tweak.R'], '["rubber_tweak"]', text='Rubber Tweak (shin.R)', slider=True)
             if is_selected({'shin_tweak.R.001'}):
                 layout.prop(pose_bones['shin_tweak.R.001'], '["rubber_tweak"]', text='Rubber Tweak (shin.R)', slider=True)
+            if is_selected({'leg.R', 'thigh_parent.R'}):
+                emit_rig_separator()
+                group1 = layout.row(align=True)
+                group2 = group1.split(factor=0.75, align=True)
+                props = group2.operator(rig_switch_parent, text='Limb Parent', icon='DOWNARROW_HLT')
+                props.bone = 'thigh_parent.R'
+                props.prop_bone = 'thigh_parent.R'
+                props.prop_id = 'limb_parent'
+                props.parent_names = '["None", "Root", "Pelvis"]'
+                props.locks = (False, False, False)
+                group2.prop(pose_bones['thigh_parent.R'], '["limb_parent"]', text='')
+                props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
+                props.bone = 'thigh_parent.R'
+                props.prop_bone = 'thigh_parent.R'
+                props.prop_id = 'limb_parent'
+                props.parent_names = '["None", "Root", "Pelvis"]'
+                props.locks = (False, False, False)
 
-        if is_selected({'head'}):
+        if is_selected({'head','MCH-head.parent'}):
             emit_rig_separator()
             layout.prop(pose_bones['head'], '["head_follow"]', text='Head Follow', slider=True)
+            group1 = layout.row(align=True)
+            group1.label(text='Head')
+            group2 = group1.split(factor=0.75, align=True)
+            props = group2.operator(rig_switch_parent, text='Head Parent', icon='DOWNARROW_HLT')
+            props.bone = 'head'
+            props.prop_bone = 'head'
+            props.prop_id = 'head_parent'
+            props.parent_names = '["None", "Root", "Chest"]'
+            props.locks = (False, False, False)
+            group2.prop(pose_bones['head'], '["head_parent"]', text='')
+            props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
+            props.bone = 'head'
+            props.prop_bone = 'head'
+            props.prop_id = 'head_parent'
+            props.parent_names = '["None", "Root", "Chest"]'
 
-        if is_selected({'eye_master.R', 'lid.T.L.002', 'lid.B.L.001', 'eye_common', 'lid.B.L.003', 'lid.T.L.003', 'eye.L', 'lid.T.L.001', 'eye.R', 'eye_master.L', 'lid.B.L', 'lid.T.L', 'lid.B.L.002'}):
+        if is_selected({'blink.R', 'blink.L', 'eye_master.R', 'lid.T.L.002', 'lid.B.L.001', 'eye_common', 'lid.B.L.003', 'lid.T.L.003', 'eye.L', 'lid.T.L.001', 'eye.R', 'eye_master.L', 'lid.B.L', 'lid.T.L', 'lid.B.L.002'}):
             emit_rig_separator()
             if is_selected({'eye_common'}):
                 layout.prop(pose_bones['eye.L'], '["lid_follow"]', text='Eyelids Follow (eye.L)', slider=True)
                 layout.prop(pose_bones['eye.R'], '["lid_follow"]', text='Eyelids Follow (eye.R)', slider=True)
-            if is_selected({'lid.T.L.002', 'lid.B.L.001', 'lid.B.L.003', 'lid.T.L.003', 'eye.L', 'lid.T.L.001', 'eye_master.L', 'lid.B.L', 'lid.T.L', 'lid.B.L.002'}):
+            if is_selected({'blink.L', 'lid.T.L.002', 'lid.B.L.001', 'lid.B.L.003', 'lid.T.L.003', 'eye.L', 'lid.T.L.001', 'eye_master.L', 'lid.B.L', 'lid.T.L', 'lid.B.L.002'}):
                 layout.prop(pose_bones['eye.L'], '["lid_follow"]', text='Eyelids Follow', slider=True)
             if is_selected({'eye.L', 'eye_master.R', 'eye.R', 'eye_master.L', 'eye_common'}):
                 group1 = layout.row(align=True)
@@ -1745,15 +1859,18 @@ class RigControl(bpy.types.Panel):
                 props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "face"]'
                 props.locks = (False, False, False)
 
-        if is_selected({'lid.B.R.002', 'eye_master.R', 'lid.T.R.003', 'lid.T.R', 'lid.T.R.001', 'lid.B.R.001', 'eye.R', 'lid.T.R.002', 'lid.B.R.003', 'lid.B.R'}):
+        if is_selected({'blink.R', 'lid.B.R.002', 'eye_master.R', 'lid.T.R.003', 'lid.T.R', 'lid.T.R.001', 'lid.B.R.001', 'eye.R', 'lid.T.R.002', 'lid.B.R.003', 'lid.B.R'}):
             emit_rig_separator()
             layout.prop(pose_bones['eye.R'], '["lid_follow"]', text='Eyelids Follow', slider=True)
 
-        if is_selected({'jaw_master_mouth', 'jaw_master'}):
+        if is_selected({'jaw_master_mouth', 'jaw_master', 'mouth'}):
             emit_rig_separator()
             layout.prop(pose_bones['jaw_master'], '["mouth_lock"]', text='Mouth Lock', slider=True)
+            emit_rig_separator()
+            layout.prop(pose_bones['lip_end.L.001'], '["eyelid_effect"]', text='Eyelid (Left)', slider=True)
+            layout.prop(pose_bones['lip_end.R.001'], '["eyelid_effect"]', text='Eyelid (Right)', slider=True)
 
-        if is_selected({'hand_fk.L', 'upper_arm_ik.L', 'hand_ik.L', 'forearm_tweak.L.001', 'upper_arm_tweak.L', 'VIS_upper_arm_ik_pole.L', 'upper_arm_parent.L', 'forearm_fk.L', 'hand_tweak.L', 'upper_arm_ik_target.L', 'upper_arm_tweak.L.001', 'upper_arm_fk.L', 'forearm_tweak.L', 'hand_ik_wrist.L'}):
+        if is_selected({'arm.L', 'hand_fk.L', 'upper_arm_ik.L', 'hand_ik.L', 'forearm_tweak.L.001', 'upper_arm_tweak.L', 'VIS_upper_arm_ik_pole.L', 'upper_arm_parent.L', 'forearm_fk.L', 'hand_tweak.L', 'upper_arm_ik_target.L', 'upper_arm_tweak.L.001', 'upper_arm_fk.L', 'forearm_tweak.L', 'hand_ik_wrist.L'}):
             emit_rig_separator()
             if is_selected({'upper_arm_parent.L', 'upper_arm_fk.L', 'hand_fk.L', 'forearm_fk.L'}):
                 layout.prop(pose_bones['upper_arm_parent.L'], '["FK_limb_follow"]', text='FK Limb Follow', slider=True)
@@ -1788,7 +1905,7 @@ class RigControl(bpy.types.Panel):
             props.extra_ctrls = '["hand_ik_wrist.L"]'
             props = group2.operator(rig_clear_keyframes, text='Clear', icon='CANCEL')
             props.bones = '["upper_arm_ik.L", "upper_arm_ik_target.L", "hand_ik.L", "hand_ik_wrist.L"]'
-            if is_selected({'upper_arm_parent.L', 'upper_arm_ik_target.L', 'upper_arm_ik.L', 'hand_ik.L', 'hand_ik_wrist.L','flip'}):
+            if is_selected({'arm.L', 'upper_arm_parent.L', 'upper_arm_ik_target.L', 'upper_arm_ik.L', 'hand_ik.L', 'hand_ik_wrist.L','torso_flip'}):
                 layout.prop(pose_bones['upper_arm_parent.L'], '["IK_Stretch"]', text='IK Stretch', slider=True)
                 group1 = layout.row(align=True)
                 group2 = group1.split(factor=0.75, align=True)
@@ -1809,14 +1926,14 @@ class RigControl(bpy.types.Panel):
                 props.bone = 'hand_ik.L'
                 props.prop_bone = 'upper_arm_parent.L'
                 props.prop_id = 'IK_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.L","Flip"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.L" ,"torso_flip"]'
                 props.locks = (False, False, False)
                 group2.prop(pose_bones['upper_arm_parent.L'], '["IK_parent"]', text='')
                 props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
                 props.bone = 'hand_ik.L'
                 props.prop_bone = 'upper_arm_parent.L'
                 props.prop_id = 'IK_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.L","Flip"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.L", "torso_flip"]'
                 props.locks = (False, False, False)
                 group1 = layout.row(align=True)
                 group2 = group1.split(factor=0.75, align=True)
@@ -1824,14 +1941,14 @@ class RigControl(bpy.types.Panel):
                 props.bone = 'upper_arm_ik_target.L'
                 props.prop_bone = 'upper_arm_parent.L'
                 props.prop_id = 'pole_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.L", "hand_ik.L"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.L", "hand_ik.L"]'
                 props.locks = (False, True, True)
                 group2.prop(pose_bones['upper_arm_parent.L'], '["pole_parent"]', text='')
                 props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
                 props.bone = 'upper_arm_ik_target.L'
                 props.prop_bone = 'upper_arm_parent.L'
                 props.prop_id = 'pole_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.L", "hand_ik.L"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.L", "hand_ik.L"]'
                 props.locks = (False, True, True)
             if is_selected({'upper_arm_tweak.L.001'}):
                 layout.prop(pose_bones['upper_arm_tweak.L.001'], '["rubber_tweak"]', text='Rubber Tweak (upper_arm.L)', slider=True)
@@ -1839,6 +1956,23 @@ class RigControl(bpy.types.Panel):
                 layout.prop(pose_bones['forearm_tweak.L'], '["rubber_tweak"]', text='Rubber Tweak (forearm.L)', slider=True)
             if is_selected({'forearm_tweak.L.001'}):
                 layout.prop(pose_bones['forearm_tweak.L.001'], '["rubber_tweak"]', text='Rubber Tweak (forearm.L)', slider=True)
+            if is_selected({'arm.L', 'upper_arm_parent.L'}):
+                emit_rig_separator()
+                group1 = layout.row(align=True)
+                group2 = group1.split(factor=0.75, align=True)
+                props = group2.operator(rig_switch_parent, text='Limb Parent', icon='DOWNARROW_HLT')
+                props.bone = 'upper_arm_parent.L'
+                props.prop_bone = 'upper_arm_parent.L'
+                props.prop_id = 'limb_parent'
+                props.parent_names = '["None", "Root", "Shoulder"]'
+                props.locks = (False, False, False)
+                group2.prop(pose_bones['upper_arm_parent.L'], '["limb_parent"]', text='')
+                props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
+                props.bone = 'upper_arm_parent.L'
+                props.prop_bone = 'upper_arm_parent.L'
+                props.prop_id = 'limb_parent'
+                props.parent_names = '["None", "Root", "Shoulder"]'
+                props.locks = (False, False, False)
 
         if is_selected({'f_index.01.L.001', 'f_index.01_master.L', 'f_index.01.L', 'f_index.03.L', 'f_index.02.L'}):
             emit_rig_separator()
@@ -1860,7 +1994,7 @@ class RigControl(bpy.types.Panel):
             emit_rig_separator()
             layout.prop(pose_bones['thumb.01_master.L'], '["finger_curve"]', text='Curvature', slider=True)
 
-        if is_selected({'upper_arm_parent.R', 'forearm_tweak.R.001', 'upper_arm_tweak.R.001', 'upper_arm_tweak.R', 'upper_arm_ik.R', 'hand_tweak.R', 'VIS_upper_arm_ik_pole.R', 'hand_fk.R', 'upper_arm_fk.R', 'hand_ik.R', 'forearm_fk.R', 'forearm_tweak.R', 'hand_ik_wrist.R', 'upper_arm_ik_target.R'}):
+        if is_selected({'arm.R', 'upper_arm_parent.R', 'forearm_tweak.R.001', 'upper_arm_tweak.R.001', 'upper_arm_tweak.R', 'upper_arm_ik.R', 'hand_tweak.R', 'VIS_upper_arm_ik_pole.R', 'hand_fk.R', 'upper_arm_fk.R', 'hand_ik.R', 'forearm_fk.R', 'forearm_tweak.R', 'hand_ik_wrist.R', 'upper_arm_ik_target.R'}):
             emit_rig_separator()
             if is_selected({'upper_arm_fk.R', 'upper_arm_parent.R', 'forearm_fk.R', 'hand_fk.R'}):
                 layout.prop(pose_bones['upper_arm_parent.R'], '["FK_limb_follow"]', text='FK Limb Follow', slider=True)
@@ -1895,7 +2029,7 @@ class RigControl(bpy.types.Panel):
             props.extra_ctrls = '["hand_ik_wrist.R"]'
             props = group2.operator(rig_clear_keyframes, text='Clear', icon='CANCEL')
             props.bones = '["upper_arm_ik.R", "upper_arm_ik_target.R", "hand_ik.R", "hand_ik_wrist.R"]'
-            if is_selected({'upper_arm_parent.R', 'hand_ik.R', 'hand_ik_wrist.R', 'upper_arm_ik.R', 'upper_arm_ik_target.R','flip'}):
+            if is_selected({'arm.R', 'upper_arm_parent.R', 'hand_ik.R', 'hand_ik_wrist.R', 'upper_arm_ik.R', 'upper_arm_ik_target.R','torso_flip'}):
                 layout.prop(pose_bones['upper_arm_parent.R'], '["IK_Stretch"]', text='IK Stretch', slider=True)
                 group1 = layout.row(align=True)
                 group2 = group1.split(factor=0.75, align=True)
@@ -1916,14 +2050,14 @@ class RigControl(bpy.types.Panel):
                 props.bone = 'hand_ik.R'
                 props.prop_bone = 'upper_arm_parent.R'
                 props.prop_id = 'IK_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.R","Flip"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.R","Flip"]'
                 props.locks = (False, False, False)
                 group2.prop(pose_bones['upper_arm_parent.R'], '["IK_parent"]', text='')
                 props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
                 props.bone = 'hand_ik.R'
                 props.prop_bone = 'upper_arm_parent.R'
                 props.prop_id = 'IK_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.R","Flip"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.R","Flip"]'
                 props.locks = (False, False, False)
                 group1 = layout.row(align=True)
                 group2 = group1.split(factor=0.75, align=True)
@@ -1931,14 +2065,14 @@ class RigControl(bpy.types.Panel):
                 props.bone = 'upper_arm_ik_target.R'
                 props.prop_bone = 'upper_arm_parent.R'
                 props.prop_id = 'pole_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.R", "hand_ik.R"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.R", "hand_ik.R"]'
                 props.locks = (False, True, True)
                 group2.prop(pose_bones['upper_arm_parent.R'], '["pole_parent"]', text='')
                 props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
                 props.bone = 'upper_arm_ik_target.R'
                 props.prop_bone = 'upper_arm_parent.R'
                 props.prop_id = 'pole_parent'
-                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.R", "hand_ik.R"]'
+                props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.R", "hand_ik.R"]'
                 props.locks = (False, True, True)
             if is_selected({'upper_arm_tweak.R.001'}):
                 layout.prop(pose_bones['upper_arm_tweak.R.001'], '["rubber_tweak"]', text='Rubber Tweak (upper_arm.R)', slider=True)
@@ -1946,6 +2080,23 @@ class RigControl(bpy.types.Panel):
                 layout.prop(pose_bones['forearm_tweak.R'], '["rubber_tweak"]', text='Rubber Tweak (forearm.R)', slider=True)
             if is_selected({'forearm_tweak.R.001'}):
                 layout.prop(pose_bones['forearm_tweak.R.001'], '["rubber_tweak"]', text='Rubber Tweak (forearm.R)', slider=True)
+            if is_selected({'arm.R', 'upper_arm_parent.R'}):
+                emit_rig_separator()
+                group1 = layout.row(align=True)
+                group2 = group1.split(factor=0.75, align=True)
+                props = group2.operator(rig_switch_parent, text='Limb Parent', icon='DOWNARROW_HLT')
+                props.bone = 'upper_arm_parent.R'
+                props.prop_bone = 'upper_arm_parent.R'
+                props.prop_id = 'limb_parent'
+                props.parent_names = '["None", "Root", "Shoulder"]'
+                props.locks = (False, False, False)
+                group2.prop(pose_bones['upper_arm_parent.R'], '["limb_parent"]', text='')
+                props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
+                props.bone = 'upper_arm_parent.R'
+                props.prop_bone = 'upper_arm_parent.R'
+                props.prop_id = 'limb_parent'
+                props.parent_names = '["None", "Root", "Shoulder"]'
+                props.locks = (False, False, False)
 
         if is_selected({'f_index.02.R', 'f_index.03.R', 'f_index.01.R.001', 'f_index.01.R', 'f_index.01_master.R'}):
             emit_rig_separator()
@@ -1984,9 +2135,44 @@ class RigControl(bpy.types.Panel):
             props.prop_id = 'torso_parent'
             props.parent_names = '["None", "Root"]'
             props.locks = (False, False, False)
-        if is_selected({'flip'}):
+        if is_selected({'chest'}):
             emit_rig_separator()
             layout.prop(pose_bones['head'], '["head_follow"]', text='Head Follow', slider=True)
+            group1 = layout.row(align=True)
+            group1.label(text='Head')
+            group2 = group1.split(factor=0.75, align=True)
+            props = group2.operator(rig_switch_parent, text='Head Parent', icon='DOWNARROW_HLT')
+            props.bone = 'head'
+            props.prop_bone = 'head'
+            props.prop_id = 'head_parent'
+            props.parent_names = '["None", "Root", "Chest"]'
+            props.locks = (False, False, False)
+            group2.prop(pose_bones['head'], '["head_parent"]', text='')
+            props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
+            props.bone = 'head'
+            props.prop_bone = 'head'
+            props.prop_id = 'head_parent'
+            props.parent_names = '["None", "Root", "Chest"]'
+        
+        if is_selected({'torso_flip', 'torso_pivot'}):
+            emit_rig_separator()
+            layout.prop(pose_bones['head'], '["head_follow"]', text='Head Follow', slider=True)
+            emit_rig_separator()
+            group1 = layout.row(align=True)
+            group1.label(text='Head')
+            group2 = group1.split(factor=0.75, align=True)
+            props = group2.operator(rig_switch_parent, text='Head Parent', icon='DOWNARROW_HLT')
+            props.bone = 'head'
+            props.prop_bone = 'head'
+            props.prop_id = 'head_parent'
+            props.parent_names = '["None", "Root", "Chest"]'
+            props.locks = (False, False, False)
+            group2.prop(pose_bones['head'], '["head_parent"]', text='')
+            props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
+            props.bone = 'head'
+            props.prop_bone = 'head'
+            props.prop_id = 'head_parent'
+            props.parent_names = '["None", "Root", "Chest"]'
             emit_rig_separator()
             group1 = layout.row(align=True)
             group1.label(text='torso')
@@ -2012,14 +2198,14 @@ class RigControl(bpy.types.Panel):
             props.bone = 'hand_ik.L'
             props.prop_bone = 'upper_arm_parent.L'
             props.prop_id = 'IK_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.L", "Flip"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.L", "torso_flip"]'
             props.locks = (False, False, False)
             group2.prop(pose_bones['upper_arm_parent.L'], '["IK_parent"]', text='')
             props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
             props.bone = 'hand_ik.L'
             props.prop_bone = 'upper_arm_parent.L'
             props.prop_id = 'IK_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.L", "Flip"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.L", "torso_flip"]'
             props.locks = (False, False, False)
             emit_rig_separator()
             group1 = layout.row(align=True)
@@ -2029,14 +2215,14 @@ class RigControl(bpy.types.Panel):
             props.bone = 'hand_ik.R'
             props.prop_bone = 'upper_arm_parent.R'
             props.prop_id = 'IK_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.R", "Flip"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.R", "torso_flip"]'
             props.locks = (False, False, False)
             group2.prop(pose_bones['upper_arm_parent.R'], '["IK_parent"]', text='')
             props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
             props.bone = 'hand_ik.R'
             props.prop_bone = 'upper_arm_parent.R'
             props.prop_id = 'IK_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "shoulder.R", "Flip"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.R", "torso_flip"]'
             props.locks = (False, False, False)
             emit_rig_separator()
             group1 = layout.row(align=True)
@@ -2046,14 +2232,14 @@ class RigControl(bpy.types.Panel):
             props.bone = 'foot_ik.L'
             props.prop_bone = 'thigh_parent.L'
             props.prop_id = 'IK_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.L.001", "Flip"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.L", "torso_flip"]'
             props.locks = (False, False, False)
             group2.prop(pose_bones['thigh_parent.L'], '["IK_parent"]', text='')
             props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
             props.bone = 'foot_ik.L'
             props.prop_bone = 'thigh_parent.L'
             props.prop_id = 'IK_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.L.001", "Flip"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.L", "torso_flip"]'
             props.locks = (False, False, False)
             emit_rig_separator()
             group1 = layout.row(align=True)
@@ -2063,22 +2249,22 @@ class RigControl(bpy.types.Panel):
             props.bone = 'foot_ik.R'
             props.prop_bone = 'thigh_parent.R'
             props.prop_id = 'IK_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.R.001", "Flip"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.R", "torso_flip"]'
             props.locks = (False, False, False)
             group2.prop(pose_bones['thigh_parent.R'], '["IK_parent"]', text='')
             props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
             props.bone = 'foot_ik.R'
             props.prop_bone = 'thigh_parent.R'
             props.prop_id = 'IK_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "pelvis.R.001", "Flip"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "leg.R", "torso_flip"]'
             props.locks = (False, False, False)
-        if is_selected({'jaw_master_mouth'}):
-            layout.prop(pose_bones['lip_end.L.001'], '["eyelid_effect"]', text='Eyelid (Left)', slider=True)
-            layout.prop(pose_bones['lip_end.R.001'], '["eyelid_effect"]', text='Eyelid (Right)', slider=True)
+
         if is_selected({'lip_end.L.001'}):
             layout.prop(pose_bones['lip_end.L.001'], '["eyelid_effect"]', text='Eyelid (Left)', slider=True)
+        
         if is_selected({'lip_end.R.001'}):
             layout.prop(pose_bones['lip_end.R.001'], '["eyelid_effect"]', text='Eyelid (Right)', slider=True)
+        
         if is_selected({'empty.parent.L'}):
             emit_rig_separator()
             group1 = layout.row(align=True)
@@ -2088,15 +2274,16 @@ class RigControl(bpy.types.Panel):
             props.bone = 'empty.parent.L'
             props.prop_bone = 'empty.parent.L'
             props.prop_id = 'empty_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "Shoulder.L", "Flip", "hand_fk.L"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.L", "torso_flip", "hand_fk.L", "hand_fk.R"]'
             props.locks = (False, False, False)
             group2.prop(pose_bones['empty.parent.L'], '["empty_parent"]', text='')
             props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
             props.bone = 'empty.parent.L'
             props.prop_bone = 'empty.parent.L'
             props.prop_id = 'empty_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "Shoulder.L", "Flip", "hand_fk.L"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.L", "torso_flip", "hand_fk.L", "hand_fk.R"]'
             props.locks = (False, False, False)
+        
         if is_selected({'empty.parent.L.001'}):
             emit_rig_separator()
             group1 = layout.row(align=True)
@@ -2106,14 +2293,14 @@ class RigControl(bpy.types.Panel):
             props.bone = 'empty.parent.L.001'
             props.prop_bone = 'empty.parent.L.001'
             props.prop_id = 'empty_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "Shoulder.L", "Flip", "hand_fk.L"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.L", "torso_flip", "hand_fk.L", "hand_fk.R"]'
             props.locks = (False, False, False)
             group2.prop(pose_bones['empty.parent.L.001'], '["empty_parent"]', text='')
             props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
             props.bone = 'empty.parent.L.001'
             props.prop_bone = 'empty.parent.L.001'
             props.prop_id = 'empty_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "Shoulder.L", "Flip", "hand_fk.L"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.L", "torso_flip", "hand_fk.L", "hand_fk.R"]'
             props.locks = (False, False, False)
         
         if is_selected({'empty.parent.R'}):
@@ -2125,15 +2312,16 @@ class RigControl(bpy.types.Panel):
             props.bone = 'empty.parent.R'
             props.prop_bone = 'empty.parent.R'
             props.prop_id = 'empty_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "Shoulder.R", "Flip", "hand_fk.R"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.R", "torso_flip", "hand_fk.R", "hand_fk.L"]'
             props.locks = (False, False, False)
             group2.prop(pose_bones['empty.parent.R'], '["empty_parent"]', text='')
             props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
             props.bone = 'empty.parent.R'
             props.prop_bone = 'empty.parent.R'
             props.prop_id = 'empty_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "Shoulder.R", "Flip", "hand_fk.R"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.R", "torso_flip", "hand_fk.R", "hand_fk.L"]'
             props.locks = (False, False, False)
+        
         if is_selected({'empty.parent.R.001'}):
             emit_rig_separator()
             group1 = layout.row(align=True)
@@ -2143,14 +2331,14 @@ class RigControl(bpy.types.Panel):
             props.bone = 'empty.parent.R.001'
             props.prop_bone = 'empty.parent.R.001'
             props.prop_id = 'empty_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "Shoulder.R", "Flip", "hand_fk.R"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.R", "torso_flip", "hand_fk.R", "hand_fk.L"]'
             props.locks = (False, False, False)
             group2.prop(pose_bones['empty.parent.R.001'], '["empty_parent"]', text='')
             props = group1.operator(rig_switch_parent_bake, text='', icon='ACTION_TWEAK')
             props.bone = 'empty.parent.R.001'
             props.prop_bone = 'empty.parent.R.001'
             props.prop_id = 'empty_parent'
-            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "Shoulder.R", "Flip", "hand_fk.R"]'
+            props.parent_names = '["None", "Root", "Torso", "Hips", "Chest", "Head", "arm.R", "torso_flip", "hand_fk.R", "hand_fk.L"]'
             props.locks = (False, False, False)
 
 class RigBakeSettings(bpy.types.Panel):
@@ -2189,7 +2377,7 @@ class RigLayers(bpy.types.Panel):
 
         row = col.row()
         row.prop(context.active_object.data, 'layers', index=16, toggle=True, text='Face Main')
-        row.prop(context.active_object.data, 'layers', index=17, toggle=True, text='Face Primary')
+        row.prop(context.active_object.data, 'layers', index=17, toggle=True, text='Face Secondary')
         row.prop(context.active_object.data, 'layers', index=18, toggle=True, text='Face Tweak')
 
         row = col.row()
