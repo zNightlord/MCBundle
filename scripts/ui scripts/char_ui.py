@@ -1,4 +1,3 @@
-from faulthandler import is_enabled
 import bpy
 import math
 import json
@@ -1409,7 +1408,8 @@ def update_rig(self,context):
     obj = context.object
     pose_bones = obj.pose.bones
     if obj.is_viewport:
-        pose_bones['panel']["subdivision"] = 0
+        obj.subdivision = 0
+        pose_bones['panel']["subdivision"] = obj.subdivision
     else:
         pose_bones['panel']["subdivision"] = obj.subdivision
 
@@ -1445,17 +1445,13 @@ def update_name(self,context):
 def update_skin(self,context):
     obj = context.object
     data = bpy.data
-    data.materials['MCB_Mat_Character_Skin'].node_tree.nodes['Image Texture'].image = bpy.data.images["MCB - Skin"]
+    data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture'].image = bpy.data.images["MCB - Skin"]
     image = data.images["MCB - Skin"]
-    try:
-        image.unpack()
-    except:
-        pass
+    print(image)
     image.filepath = obj.skin   
-    image.pack()
 
 bpy.types.Object.second_layer = BoolProperty(name="Second Layer", default= False, override={"LIBRARY_OVERRIDABLE"},update= update_collection)
-bpy.types.Object.restricted_select = BoolProperty(name="Restricted Select", default= True, override={"LIBRARY_OVERRIDABLE"},update= update_collection)
+bpy.types.Object.restricted_select = BoolProperty(name="Restricted Select", default= False, override={"LIBRARY_OVERRIDABLE"},update= update_collection)
 
 bpy.types.Object.is_viewport = BoolProperty(name="Solid Viewport", default= False, override={"LIBRARY_OVERRIDABLE"},update= update_rig)
 bpy.types.Object.subdivision = IntProperty(name="Subdivision", default= 0, min= 0, max= 2, override={"LIBRARY_OVERRIDABLE"},update= update_rig)
@@ -1464,7 +1460,8 @@ bpy.types.Object.tmp_rig_name = StringProperty(name="tmp_rig_name", default= "",
 
 bpy.types.Object.skin = StringProperty(name = "Skin Directory", description= "Add your skin here (1.8 Skin Support)", override= {"LIBRARY_OVERRIDABLE"}, subtype= "FILE_PATH", update= update_skin)
 
-
+import addon_utils
+add_default,add_state = addon_utils.check('MCprep_addon')
 ## mcprep integration
 mcprep = False
 try:
@@ -1473,7 +1470,7 @@ try:
     mcprep = True
 except:
     data = bpy.data
-    data.materials['MCB_Mat_Character_Skin'].node_tree.nodes['Image Texture'].image = bpy.data.images["MCB - Skin"]
+    data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture'].image = bpy.data.images["MCB - Skin"]
 
 class RigUI(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
@@ -1510,14 +1507,15 @@ class RigProperties(bpy.types.Panel):
         act_obj = context.active_object
         pose_bones = obj.pose.bones
         
-        import addon_utils
-        is_enable,is_loaded = addon_utils.check('MCprep_addon')
 
         group1 = layout.column(align= True)
         group1.label(text=" Name:")
         group1.prop(obj, "rig_name",text= "")
         
-        if is_loaded:
+        # image = data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture']
+        # group1_row.prop(image, "image", icon= "IMAGE_DATA", text= "")
+        # data.materials['MCB_Mat_Skin'].node_tree.nodes['Image Texture'].image
+        try:
             group1 = layout.column(align= True) 
             group1_col = group1.column(align= True).box()
             group1_col.template_list(
@@ -1538,7 +1536,7 @@ class RigProperties(bpy.types.Panel):
             p.new_material = False
             p = group1_row.operator("mcprep.applyusernameskin", text="",icon="IMPORT")
             p.new_material = False
-        else:
+        except:
             group1 = layout.column(align= True) 
             group1_row = group1.row(align= True)
             group1_row.prop(obj, "skin", icon= "IMAGE_DATA", text= "")
@@ -1560,10 +1558,6 @@ class RigProperties(bpy.types.Panel):
         group1_col = group1.column(align=True)
         group1_col.prop(pose_bones['panel'], '["pupil_color"]', text='')
         group1_col.prop(pose_bones['panel'], '["brow_color"]', text='')
-        group1 = layout.column(align= True) 
-        group1_col = group1.column(align=True)
-        group1_col.prop(pose_bones['panel'], '["face_deform"]', text='Face Deform')
-        
         
 class RigControl(bpy.types.Panel):
     bl_space_type = 'VIEW_3D'
@@ -1607,6 +1601,13 @@ class RigControl(bpy.types.Panel):
                 layout.separator()
             num_rig_separators[0] += 1
 
+        # if (bpy.context.object.mode == 'POSE'):
+        # layout.label(text='Global')
+
+        # if is_selected({'lip.T.corner.L.001'}):
+        #     emit_rig_separator()
+        #     layout.prop(pose_bones['lip.T.corner.L.001'], '["enable_bone_gizmo"]', text='Enable Bone Gizmo', slider=False)
+        
         if is_selected({'leg.L','shin_tweak.L.001', 'foot_heel_ik.L', 'foot_tweak.L', 'foot_spin_ik.L', 'thigh_fk.L', 'thigh_parent.L', 'thigh_tweak.L', 'foot_fk.L', 'thigh_ik.L', 'shin_fk.L', 'VIS_thigh_ik_pole.L', 'foot_ik.L', 'toe.L', 'thigh_ik_target.L', 'thigh_tweak.L.001', 'shin_tweak.L'}):
             emit_rig_separator()
             if is_selected({'foot_fk.L', 'toe.L', 'thigh_fk.L', 'thigh_parent.L', 'shin_fk.L'}):
@@ -1992,13 +1993,6 @@ class RigControl(bpy.types.Panel):
         if is_selected({'thumb.03.L', 'thumb.02.L', 'thumb.01.L', 'thumb.01_master.L', 'thumb.01.L.001'}):
             emit_rig_separator()
             layout.prop(pose_bones['thumb.01_master.L'], '["finger_curve"]', text='Curvature', slider=True)
-            if is_selected({'thumb.01_master.L'}):
-                emit_rig_separator()
-                layout.prop(pose_bones['fingers.L'], '["thumb_fill"]', text='Thumb fill', slider=True)
-
-        if is_selected({'fingers.L'}):
-                emit_rig_separator()
-                layout.prop(pose_bones['fingers.L'], '["thumb_fill"]', text='Thumb fill', slider=True)
 
         if is_selected({'arm.R', 'upper_arm_parent.R', 'forearm_tweak.R.001', 'upper_arm_tweak.R.001', 'upper_arm_tweak.R', 'upper_arm_ik.R', 'hand_tweak.R', 'VIS_upper_arm_ik_pole.R', 'hand_fk.R', 'upper_arm_fk.R', 'hand_ik.R', 'forearm_fk.R', 'forearm_tweak.R', 'hand_ik_wrist.R', 'upper_arm_ik_target.R'}):
             emit_rig_separator()
@@ -2123,14 +2117,6 @@ class RigControl(bpy.types.Panel):
         if is_selected({'thumb.01.R', 'thumb.03.R', 'thumb.01.R.001', 'thumb.01_master.R', 'thumb.02.R'}):
             emit_rig_separator()
             layout.prop(pose_bones['thumb.01_master.R'], '["finger_curve"]', text='Curvature', slider=True)
-            if is_selected({'thumb.01_master.R'}):
-                emit_rig_separator()
-                layout.prop(pose_bones['fingers.R'], '["thumb_fill"]', text='Thumb fill', slider=True)
-
-        if is_selected({'fingers.R'}):
-                emit_rig_separator()
-                layout.prop(pose_bones['fingers.R'], '["thumb_fill"]', text='Thumb fill', slider=True)
-
 
         if is_selected({'tweak_spine.004', 'tweak_spine.002', 'torso', 'spine_fk.002', 'spine_fk', 'tweak_spine.001', 'tweak_spine', 'spine_fk.003', 'spine_fk.001', 'hips', 'tweak_spine.003', 'chest'}):
             emit_rig_separator()
