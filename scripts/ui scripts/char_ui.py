@@ -3,7 +3,7 @@ import math
 import json
 import collections
 import traceback
-from math import fabs, pi
+from math import pi
 from bpy.props import StringProperty,BoolProperty,IntProperty,FloatProperty
 from mathutils import Euler, Matrix, Quaternion, Vector
 from rna_prop_ui import rna_idprop_quote_path
